@@ -1,0 +1,9 @@
+{
+  "name": "Cache Redis",
+  "description": "Redis-backed distributed cache provider",
+  "version": "0.1.0",
+  "author": "MuxCore",
+  "roles": ["infrastructure"],
+  "capabilities": ["cache"],
+  "contracts": []
+}

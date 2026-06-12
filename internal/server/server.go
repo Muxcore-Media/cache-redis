@@ -1,162 +1,151 @@
 package server
 
 import (
-	"encoding/json"
+	"context"
 	"fmt"
-	"io"
 	"log/slog"
-	"net/http"
-	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
+	cachev1 "github.com/Muxcore-Media/core/proto/gen/muxcore/cache/v1"
 	"github.com/Muxcore-Media/cache-redis/internal/cache"
 )
 
 type Server struct {
-	cache       *cache.Cache
-	getCount    atomic.Int64
-	setCount    atomic.Int64
-	delCount    atomic.Int64
-	incrCount   atomic.Int64
+	cachev1.UnimplementedCacheServiceServer
+	cache      *cache.Cache
+	getCount   atomic.Int64
+	setCount   atomic.Int64
+	delCount   atomic.Int64
+	incrCount  atomic.Int64
+	lockMu     sync.Mutex
+	locks      map[string]*cache.Lock
 }
 
 func New(c *cache.Cache) *Server {
-	return &Server{cache: c}
-}
-
-func (s *Server) Handler() http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/v1/cache/", s.handleKey)
-	mux.HandleFunc("/v1/cache", s.handleList)
-	mux.HandleFunc("/v1/cache/exists/", s.handleExists)
-	mux.HandleFunc("/v1/cache/incr/", s.handleIncr)
-	mux.HandleFunc("/health", s.handleHealth)
-	mux.HandleFunc("/metrics", s.handleMetrics)
-	return mux
-}
-
-func (s *Server) handleKey(w http.ResponseWriter, r *http.Request) {
-	key := strings.TrimPrefix(r.URL.Path, "/v1/cache/")
-	key = strings.TrimSuffix(key, "/")
-	if key == "" {
-		http.Error(w, `{"error":"key is required"}`, http.StatusBadRequest)
-		return
-	}
-
-	switch r.Method {
-	case http.MethodGet:
-		s.handleGet(w, r, key)
-	case http.MethodPut:
-		s.handleSet(w, r, key)
-	case http.MethodDelete:
-		s.handleDelete(w, r, key)
-	default:
-		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+	return &Server{
+		cache: c,
+		locks: make(map[string]*cache.Lock),
 	}
 }
 
-func (s *Server) handleGet(w http.ResponseWriter, r *http.Request, key string) {
-	data, err := s.cache.Get(r.Context(), key)
+func (s *Server) RegisterWithGRPC(srv *grpc.Server) {
+	cachev1.RegisterCacheServiceServer(srv, s)
+}
+
+func (s *Server) Get(ctx context.Context, req *cachev1.GetCacheRequest) (*cachev1.GetCacheResponse, error) {
+	if req.GetKey() == "" {
+		return nil, status.Error(codes.InvalidArgument, "key is required")
+	}
+	data, err := s.cache.Get(ctx, req.GetKey())
 	if err != nil {
-		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
-		slog.Error("cache: get failed", "key", key, "error", err)
-		return
+		slog.Error("cache: get failed", "key", req.GetKey(), "error", err)
+		return nil, status.Error(codes.Internal, "get failed")
 	}
 	s.getCount.Add(1)
 	if data == nil {
-		http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
-		return
+		return &cachev1.GetCacheResponse{Key: req.GetKey(), Found: false}, nil
 	}
-	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Write(data)
+	return &cachev1.GetCacheResponse{Key: req.GetKey(), Value: data, Found: true}, nil
 }
 
-func (s *Server) handleSet(w http.ResponseWriter, r *http.Request, key string) {
-	ttl := 0 * time.Second
-	if ttlStr := r.Header.Get("X-Cache-TTL"); ttlStr != "" {
-		if sec, err := strconv.Atoi(ttlStr); err == nil && sec > 0 {
-			ttl = time.Duration(sec) * time.Second
-		}
+func (s *Server) Set(ctx context.Context, req *cachev1.SetCacheRequest) (*cachev1.SetCacheResponse, error) {
+	if req.GetKey() == "" {
+		return nil, status.Error(codes.InvalidArgument, "key is required")
 	}
-	defer r.Body.Close()
-	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 10<<20))
-	if err != nil {
-		http.Error(w, `{"error":"body too large"}`, http.StatusRequestEntityTooLarge)
-		return
-	}
-	if err := s.cache.Set(r.Context(), key, data, ttl); err != nil {
-		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
-		slog.Error("cache: set failed", "key", key, "error", err)
-		return
+	ttl := time.Duration(req.GetTtlSeconds()) * time.Second
+	if err := s.cache.Set(ctx, req.GetKey(), req.GetValue(), ttl); err != nil {
+		slog.Error("cache: set failed", "key", req.GetKey(), "error", err)
+		return nil, status.Error(codes.Internal, "set failed")
 	}
 	s.setCount.Add(1)
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	return &cachev1.SetCacheResponse{Status: "ok"}, nil
 }
 
-func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request, key string) {
-	if err := s.cache.Delete(r.Context(), key); err != nil {
-		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
-		slog.Error("cache: delete failed", "key", key, "error", err)
-		return
+func (s *Server) Delete(ctx context.Context, req *cachev1.DeleteCacheRequest) (*cachev1.DeleteCacheResponse, error) {
+	if err := s.cache.Delete(ctx, req.GetKeys()...); err != nil {
+		slog.Error("cache: delete failed", "keys", req.GetKeys(), "error", err)
+		return nil, status.Error(codes.Internal, "delete failed")
 	}
 	s.delCount.Add(1)
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	return &cachev1.DeleteCacheResponse{Deleted: int32(len(req.GetKeys()))}, nil
 }
 
-func (s *Server) handleExists(w http.ResponseWriter, r *http.Request) {
-	key := strings.TrimPrefix(r.URL.Path, "/v1/cache/exists/")
-	key = strings.TrimSuffix(key, "/")
-	if key == "" {
-		http.Error(w, `{"error":"key is required"}`, http.StatusBadRequest)
-		return
-	}
-	exists, err := s.cache.Exists(r.Context(), key)
+func (s *Server) Exists(ctx context.Context, req *cachev1.ExistsCacheRequest) (*cachev1.ExistsCacheResponse, error) {
+	exists, err := s.cache.Exists(ctx, req.GetKey())
 	if err != nil {
-		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
-		slog.Error("cache: exists failed", "key", key, "error", err)
-		return
+		return nil, status.Error(codes.Internal, "exists check failed")
 	}
-	writeJSON(w, http.StatusOK, map[string]bool{"exists": exists})
+	return &cachev1.ExistsCacheResponse{Exists: exists}, nil
 }
 
-func (s *Server) handleIncr(w http.ResponseWriter, r *http.Request) {
-	key := strings.TrimPrefix(r.URL.Path, "/v1/cache/incr/")
-	key = strings.TrimSuffix(key, "/")
-	if key == "" {
-		http.Error(w, `{"error":"key is required"}`, http.StatusBadRequest)
-		return
-	}
-	delta := int64(1)
-	if d := r.URL.Query().Get("delta"); d != "" {
-		if n, err := strconv.ParseInt(d, 10, 64); err == nil {
-			delta = n
-		}
-	}
-	n, err := s.cache.Incr(r.Context(), key, delta)
+func (s *Server) Incr(ctx context.Context, req *cachev1.IncrCacheRequest) (*cachev1.IncrCacheResponse, error) {
+	n, err := s.cache.Incr(ctx, req.GetKey(), req.GetDelta())
 	if err != nil {
-		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
-		slog.Error("cache: incr failed", "key", key, "error", err)
-		return
+		return nil, status.Error(codes.Internal, "incr failed")
 	}
 	s.incrCount.Add(1)
-	writeJSON(w, http.StatusOK, map[string]int64{"value": n})
+	return &cachev1.IncrCacheResponse{Value: n}, nil
 }
 
-func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
-}
-
-func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	if err := s.cache.Health(r.Context()); err != nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "unhealthy", "error": err.Error()})
-		return
+func (s *Server) CompareAndSwap(ctx context.Context, req *cachev1.CompareAndSwapCacheRequest) (*cachev1.CompareAndSwapCacheResponse, error) {
+	swapped, err := s.cache.CompareAndSwap(ctx, req.GetKey(), req.GetOldValue(), req.GetNewValue())
+	if err != nil {
+		return nil, status.Error(codes.Internal, "cas failed")
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	return &cachev1.CompareAndSwapCacheResponse{Swapped: swapped}, nil
 }
 
-func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
+func (s *Server) Lock(ctx context.Context, req *cachev1.LockCacheRequest) (*cachev1.LockCacheResponse, error) {
+	ttl := time.Duration(req.GetTtlSeconds()) * time.Second
+	if ttl <= 0 {
+		ttl = 30 * time.Second
+	}
+	lk, err := s.cache.Lock(ctx, req.GetKey(), ttl)
+	if err != nil {
+		return &cachev1.LockCacheResponse{
+			Key:      req.GetKey(),
+			Acquired: false,
+		}, nil
+	}
+	token := fmt.Sprintf("%x", time.Now().UnixNano())
+	s.lockMu.Lock()
+	s.locks[token] = lk
+	s.lockMu.Unlock()
+	return &cachev1.LockCacheResponse{
+		Key:      req.GetKey(),
+		Token:    token,
+		Acquired: true,
+	}, nil
+}
+
+func (s *Server) Unlock(ctx context.Context, req *cachev1.UnlockCacheRequest) (*cachev1.UnlockCacheResponse, error) {
+	token := req.GetToken()
+	s.lockMu.Lock()
+	lk, ok := s.locks[token]
+	delete(s.locks, token)
+	s.lockMu.Unlock()
+	if !ok {
+		return &cachev1.UnlockCacheResponse{Status: "lock not found"}, nil
+	}
+	lk.Unlock(ctx)
+	return &cachev1.UnlockCacheResponse{Status: "ok"}, nil
+}
+
+func (s *Server) Publish(ctx context.Context, req *cachev1.PublishCacheRequest) (*cachev1.PublishCacheResponse, error) {
+	if err := s.cache.Publish(ctx, req.GetChannel(), req.GetMessage()); err != nil {
+		return nil, status.Error(codes.Internal, "publish failed")
+	}
+	return &cachev1.PublishCacheResponse{}, nil
+}
+
+func (s *Server) Metrics() string {
 	var b strings.Builder
 	b.WriteString("# HELP cache_get_total Total cache get operations\n")
 	b.WriteString("# TYPE cache_get_total counter\n")
@@ -170,12 +159,21 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	b.WriteString("# HELP cache_incr_total Total cache increment operations\n")
 	b.WriteString("# TYPE cache_incr_total counter\n")
 	fmt.Fprintf(&b, "cache_incr_total %d\n", s.incrCount.Load())
-	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
-	w.Write([]byte(b.String()))
+	return b.String()
 }
 
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
+func (s *Server) Subscribe(req *cachev1.SubscribeCacheRequest, stream cachev1.CacheService_SubscribeServer) error {
+	ch, err := s.cache.Subscribe(stream.Context(), req.GetChannel())
+	if err != nil {
+		return status.Error(codes.Internal, "subscribe failed")
+	}
+	for msg := range ch {
+		if err := stream.Send(&cachev1.SubscribeCacheResponse{
+			Channel: req.GetChannel(),
+			Message: msg,
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
