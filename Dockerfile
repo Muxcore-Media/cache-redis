@@ -1,10 +1,9 @@
 FROM golang:1.26-alpine AS builder
-WORKDIR /build
-COPY go.mod go.sum ./
+COPY core/ /build/core/
+COPY cache-redis/ /build/cache-redis/
+WORKDIR /build/cache-redis
 RUN go mod download
-COPY . .
-RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /build/cache-redis ./cmd/module
-
+RUN CGO_ENABLED=0 go build -o /cache-redis ./cmd/module
 FROM gcr.io/distroless/static-debian12:nonroot
-COPY --from=builder /build/cache-redis /
+COPY --from=builder /cache-redis /
 ENTRYPOINT ["/cache-redis"]
