@@ -1,29 +1,27 @@
 services:
-  core:
-    image: ghcr.io/muxcore-media/core:latest
+  redis:
+    image: redis:7-alpine
     ports:
-      - "9090:9090"
-    environment:
-      MUXCORE_INSECURE_DISABLE_TLS: "true"
-      MUXCORE_LOG_LEVEL: debug
+      - "6379:6379"
     healthcheck:
-      test: ["CMD", "wget", "-q", "--tries=1", "--spider", "http://localhost:9090/health"]
+      test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
       retries: 10
-      start_period: 5s
+      start_period: 3s
 
-  your-module:
+  cache-redis:
     build:
-      context: .
+      context: ..
       dockerfile: Dockerfile
     ports:
-      - "9400"
+      - "9600"
     environment:
       MUXCORE_GRPC_ADDR: core:9090
       MUXCORE_INSECURE_DISABLE_TLS: "true"
       MUXCORE_LOG_LEVEL: debug
-      MUXCORE_MODULE_ID: your-module
+      MUXCORE_MODULE_ID: cache-redis
+      REDIS_ADDR: redis:6379
     depends_on:
-      core:
+      redis:
         condition: service_healthy

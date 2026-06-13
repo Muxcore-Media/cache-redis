@@ -18,14 +18,18 @@ type Cache struct {
 
 func New(addr, password string, db int) (*Cache, error) {
 	client := redis.NewClient(&redis.Options{
-		Addr:         addr,
-		Password:     password,
-		DB:           db,
-		DialTimeout:  5 * time.Second,
-		ReadTimeout:  3 * time.Second,
-		WriteTimeout: 3 * time.Second,
-		PoolSize:     10,
-		MinIdleConns: 2,
+		Addr:            addr,
+		Password:        password,
+		DB:              db,
+		DialTimeout:     5 * time.Second,
+		ReadTimeout:     3 * time.Second,
+		WriteTimeout:    3 * time.Second,
+		MaxRetries:      3,
+		MinRetryBackoff: 100 * time.Millisecond,
+		MaxRetryBackoff: 2 * time.Second,
+		PoolSize:        10,
+		MinIdleConns:    2,
+		PoolTimeout:     4 * time.Second,
 	})
 
 	if err := client.Ping(context.Background()).Err(); err != nil {
@@ -89,9 +93,34 @@ func (c *Cache) Incr(ctx context.Context, key string, delta int64) (int64, error
 }
 
 func (c *Cache) CompareAndSwap(ctx context.Context, key string, oldValue, newValue []byte) (bool, error) {
-	return c.client.SetArgs(ctx, key, newValue, redis.SetArgs{
-		Mode: "XX",
-	}).Err() == nil, nil
+	var script *redis.Script
+	var args []interface{}
+	if oldValue == nil {
+		script = redis.NewScript(`
+			local exists = redis.call("EXISTS", KEYS[1])
+			if exists == 1 then
+				return 0
+			end
+			redis.call("SET", KEYS[1], ARGV[1])
+			return 1
+		`)
+		args = []interface{}{newValue}
+	} else {
+		script = redis.NewScript(`
+			local current = redis.call("GET", KEYS[1])
+			if current ~= ARGV[1] then
+				return 0
+			end
+			redis.call("SET", KEYS[1], ARGV[2])
+			return 1
+		`)
+		args = []interface{}{oldValue, newValue}
+	}
+	result, err := script.Run(ctx, c.client, []string{key}, args...).Result()
+	if err != nil {
+		return false, fmt.Errorf("redis cas %q: %w", key, err)
+	}
+	return result.(int64) == 1, nil
 }
 
 type Lock struct {
