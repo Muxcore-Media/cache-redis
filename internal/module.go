@@ -10,9 +10,9 @@ import (
 
 	"google.golang.org/grpc"
 
-	"github.com/Muxcore-Media/core/pkg/contracts"
 	"github.com/Muxcore-Media/cache-redis/internal/cache"
 	"github.com/Muxcore-Media/cache-redis/internal/server"
+	"github.com/Muxcore-Media/core/pkg/contracts"
 )
 
 type Module struct {
@@ -77,7 +77,7 @@ func (m *Module) Info() contracts.ModuleInfo {
 		Roles:        []string{"infrastructure"},
 		Description:  "Redis-backed distributed cache provider",
 		Author:       "MuxCore",
-		Capabilities: []string{contracts.CapabilityCache},
+		Capabilities: []string{contracts.CapabilityCache, "cache.redis"},
 		HTTPAddr:     m.grpcAddr,
 	}
 }
