@@ -88,10 +88,36 @@ func (c *Cache) Incr(ctx context.Context, key string, delta int64) (int64, error
 	return n, nil
 }
 
+var casScript = redis.NewScript(`
+local current = redis.call("GET", KEYS[1])
+local expect_missing = ARGV[1]
+local expected = ARGV[2]
+local newval = ARGV[3]
+if expect_missing == "1" then
+	if current ~= false then
+		return 0
+	end
+else
+	if current ~= expected then
+		return 0
+	end
+end
+redis.call("SET", KEYS[1], newval)
+return 1
+`)
+
 func (c *Cache) CompareAndSwap(ctx context.Context, key string, oldValue, newValue []byte) (bool, error) {
-	return c.client.SetArgs(ctx, key, newValue, redis.SetArgs{
-		Mode: "XX",
-	}).Err() == nil, nil
+	expectMissing := "0"
+	expected := string(oldValue)
+	if oldValue == nil {
+		expectMissing = "1"
+		expected = ""
+	}
+	n, err := casScript.Run(ctx, c.client, []string{key}, expectMissing, expected, string(newValue)).Int64()
+	if err != nil {
+		return false, fmt.Errorf("redis cas %q: %w", key, err)
+	}
+	return n == 1, nil
 }
 
 type Lock struct {

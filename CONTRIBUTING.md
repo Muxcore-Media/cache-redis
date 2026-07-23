@@ -1,4 +1,4 @@
-# Contributing to Your Module
+# Contributing to Cache Redis
 
 ## Development Setup
 
@@ -6,12 +6,13 @@
 
 - Go 1.26.x
 - golangci-lint (optional but recommended)
+- A reachable Redis instance for manual runs
 
 ### Clone and build
 
 ```bash
-git clone https://github.com/yourorg/your-module.git
-cd your-module
+git clone https://github.com/Muxcore-Media/cache-redis.git
+cd cache-redis
 make build
 ```
 
@@ -23,7 +24,7 @@ cd ../core
 MUXCORE_INSECURE_DISABLE_TLS=true ./muxcored
 
 # Terminal 2: start module
-make build && ./your-module --muxcore-mesh-addr localhost:9090
+make build && ./cache-redis --muxcore-mesh-addr localhost:9090
 ```
 
 ## Running Tests
@@ -60,10 +61,10 @@ refactor/<short-description>
 
 ## Pull Request Process
 
-1. Branch from `main`.
+1. Branch from `master`.
 2. Make your changes with tests.
 3. Run `make ci` locally — it must pass.
-4. Open a PR against `main`.
+4. Open a PR against `master`.
 5. Squash-merge preferred.
 
 ## Security Vulnerabilities
