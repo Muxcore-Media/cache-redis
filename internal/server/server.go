@@ -13,19 +13,19 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	cachev1 "github.com/Muxcore-Media/core/proto/gen/muxcore/cache/v1"
 	"github.com/Muxcore-Media/cache-redis/internal/cache"
+	cachev1 "github.com/Muxcore-Media/core/proto/gen/muxcore/cache/v1"
 )
 
 type Server struct {
 	cachev1.UnimplementedCacheServiceServer
-	cache      *cache.Cache
-	getCount   atomic.Int64
-	setCount   atomic.Int64
-	delCount   atomic.Int64
-	incrCount  atomic.Int64
-	lockMu     sync.Mutex
-	locks      map[string]*cache.Lock
+	cache     *cache.Cache
+	getCount  atomic.Int64
+	setCount  atomic.Int64
+	delCount  atomic.Int64
+	incrCount atomic.Int64
+	lockMu    sync.Mutex
+	locks     map[string]*cache.Lock
 }
 
 func New(c *cache.Cache) *Server {
