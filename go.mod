@@ -8,7 +8,7 @@ require (
 	github.com/Muxcore-Media/core/sdk/go/module v0.1.0
 	github.com/alicebob/miniredis/v2 v2.38.0
 	github.com/redis/go-redis/v9 v9.21.0
-	google.golang.org/grpc v1.82.1
+	google.golang.org/grpc v1.83.0
 )
 
 require (
