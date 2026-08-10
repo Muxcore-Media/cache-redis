@@ -1,14 +1,15 @@
 {
   "name": "Cache Redis",
   "description": "Redis-backed distributed cache provider",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "author": "MuxCore",
   "roles": [
     "infrastructure"
   ],
   "capabilities": [
     "cache",
-    "cache.redis"
+    "cache.redis",
+    "settings"
   ],
   "contracts": []
 }
