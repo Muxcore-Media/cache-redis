@@ -20,6 +20,10 @@ Module request ──→ cache-redis (gRPC) ──→ Redis
 
 Requires a reachable Redis instance. Values are opaque bytes; TTL is honored on `Set` and `Lock`.
 
+**Tests:** unit tests use [miniredis](https://github.com/alicebob/miniredis) (no Docker). Self-hosted CI also starts `redis:7-alpine` and runs a live round-trip when Redis is reachable; otherwise the live test skips.
+
+Laptop demos that do not need a shared Redis should prefer [`cache-local`](https://github.com/Muxcore-Media/cache-local) (spool `default`). Opt into this module with spool tag `cache-redis`.
+
 ---
 
 ## Configuration
