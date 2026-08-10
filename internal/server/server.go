@@ -19,7 +19,7 @@ import (
 
 type Server struct {
 	cachev1.UnimplementedCacheServiceServer
-	cache     *cache.Cache
+	cachePtr  atomic.Pointer[cache.Cache]
 	getCount  atomic.Int64
 	setCount  atomic.Int64
 	delCount  atomic.Int64
@@ -29,10 +29,25 @@ type Server struct {
 }
 
 func New(c *cache.Cache) *Server {
-	return &Server{
-		cache: c,
+	s := &Server{
 		locks: make(map[string]*cache.Lock),
 	}
+	s.cachePtr.Store(c)
+	return s
+}
+
+// ReplaceCache swaps the backing Redis client and drops in-memory lock tokens.
+// Returns the previous cache (caller should Close it).
+func (s *Server) ReplaceCache(c *cache.Cache) *cache.Cache {
+	old := s.cachePtr.Swap(c)
+	s.lockMu.Lock()
+	s.locks = make(map[string]*cache.Lock)
+	s.lockMu.Unlock()
+	return old
+}
+
+func (s *Server) cache() *cache.Cache {
+	return s.cachePtr.Load()
 }
 
 func (s *Server) RegisterWithGRPC(srv *grpc.Server) {
@@ -43,7 +58,7 @@ func (s *Server) Get(ctx context.Context, req *cachev1.GetCacheRequest) (*cachev
 	if req.GetKey() == "" {
 		return nil, status.Error(codes.InvalidArgument, "key is required")
 	}
-	data, err := s.cache.Get(ctx, req.GetKey())
+	data, err := s.cache().Get(ctx, req.GetKey())
 	if err != nil {
 		slog.Error("cache: get failed", "key", req.GetKey(), "error", err)
 		return nil, status.Error(codes.Internal, "get failed")
@@ -60,7 +75,7 @@ func (s *Server) Set(ctx context.Context, req *cachev1.SetCacheRequest) (*cachev
 		return nil, status.Error(codes.InvalidArgument, "key is required")
 	}
 	ttl := time.Duration(req.GetTtlSeconds()) * time.Second
-	if err := s.cache.Set(ctx, req.GetKey(), req.GetValue(), ttl); err != nil {
+	if err := s.cache().Set(ctx, req.GetKey(), req.GetValue(), ttl); err != nil {
 		slog.Error("cache: set failed", "key", req.GetKey(), "error", err)
 		return nil, status.Error(codes.Internal, "set failed")
 	}
@@ -69,7 +84,7 @@ func (s *Server) Set(ctx context.Context, req *cachev1.SetCacheRequest) (*cachev
 }
 
 func (s *Server) Delete(ctx context.Context, req *cachev1.DeleteCacheRequest) (*cachev1.DeleteCacheResponse, error) {
-	if err := s.cache.Delete(ctx, req.GetKeys()...); err != nil {
+	if err := s.cache().Delete(ctx, req.GetKeys()...); err != nil {
 		slog.Error("cache: delete failed", "keys", req.GetKeys(), "error", err)
 		return nil, status.Error(codes.Internal, "delete failed")
 	}
@@ -78,7 +93,7 @@ func (s *Server) Delete(ctx context.Context, req *cachev1.DeleteCacheRequest) (*
 }
 
 func (s *Server) Exists(ctx context.Context, req *cachev1.ExistsCacheRequest) (*cachev1.ExistsCacheResponse, error) {
-	exists, err := s.cache.Exists(ctx, req.GetKey())
+	exists, err := s.cache().Exists(ctx, req.GetKey())
 	if err != nil {
 		return nil, status.Error(codes.Internal, "exists check failed")
 	}
@@ -86,7 +101,7 @@ func (s *Server) Exists(ctx context.Context, req *cachev1.ExistsCacheRequest) (*
 }
 
 func (s *Server) Incr(ctx context.Context, req *cachev1.IncrCacheRequest) (*cachev1.IncrCacheResponse, error) {
-	n, err := s.cache.Incr(ctx, req.GetKey(), req.GetDelta())
+	n, err := s.cache().Incr(ctx, req.GetKey(), req.GetDelta())
 	if err != nil {
 		return nil, status.Error(codes.Internal, "incr failed")
 	}
@@ -95,7 +110,7 @@ func (s *Server) Incr(ctx context.Context, req *cachev1.IncrCacheRequest) (*cach
 }
 
 func (s *Server) CompareAndSwap(ctx context.Context, req *cachev1.CompareAndSwapCacheRequest) (*cachev1.CompareAndSwapCacheResponse, error) {
-	swapped, err := s.cache.CompareAndSwap(ctx, req.GetKey(), req.GetOldValue(), req.GetNewValue())
+	swapped, err := s.cache().CompareAndSwap(ctx, req.GetKey(), req.GetOldValue(), req.GetNewValue())
 	if err != nil {
 		return nil, status.Error(codes.Internal, "cas failed")
 	}
@@ -107,7 +122,7 @@ func (s *Server) Lock(ctx context.Context, req *cachev1.LockCacheRequest) (*cach
 	if ttl <= 0 {
 		ttl = 30 * time.Second
 	}
-	lk, err := s.cache.Lock(ctx, req.GetKey(), ttl)
+	lk, err := s.cache().Lock(ctx, req.GetKey(), ttl)
 	if err != nil {
 		return &cachev1.LockCacheResponse{
 			Key:      req.GetKey(),
@@ -139,7 +154,7 @@ func (s *Server) Unlock(ctx context.Context, req *cachev1.UnlockCacheRequest) (*
 }
 
 func (s *Server) Publish(ctx context.Context, req *cachev1.PublishCacheRequest) (*cachev1.PublishCacheResponse, error) {
-	if err := s.cache.Publish(ctx, req.GetChannel(), req.GetMessage()); err != nil {
+	if err := s.cache().Publish(ctx, req.GetChannel(), req.GetMessage()); err != nil {
 		return nil, status.Error(codes.Internal, "publish failed")
 	}
 	return &cachev1.PublishCacheResponse{}, nil
@@ -163,7 +178,7 @@ func (s *Server) Metrics() string {
 }
 
 func (s *Server) Subscribe(req *cachev1.SubscribeCacheRequest, stream cachev1.CacheService_SubscribeServer) error {
-	ch, err := s.cache.Subscribe(stream.Context(), req.GetChannel())
+	ch, err := s.cache().Subscribe(stream.Context(), req.GetChannel())
 	if err != nil {
 		return status.Error(codes.Internal, "subscribe failed")
 	}

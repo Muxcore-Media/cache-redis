@@ -7,12 +7,14 @@ import (
 	"net"
 	"os"
 	"strconv"
+	"sync"
 
 	"google.golang.org/grpc"
 
 	"github.com/Muxcore-Media/cache-redis/internal/cache"
 	"github.com/Muxcore-Media/cache-redis/internal/server"
 	"github.com/Muxcore-Media/core/pkg/contracts"
+	modulesdk "github.com/Muxcore-Media/core/sdk/go/module"
 )
 
 type Module struct {
@@ -22,6 +24,7 @@ type Module struct {
 	lis     net.Listener
 
 	id       string
+	cfgMu    sync.RWMutex
 	redis    string
 	password string
 	db       int
@@ -73,7 +76,7 @@ func (m *Module) Info() contracts.ModuleInfo {
 	return contracts.ModuleInfo{
 		ID:           m.id,
 		Name:         "Cache Redis",
-		Version:      "0.1.2",
+		Version:      "0.1.3",
 		Roles:        []string{"infrastructure"},
 		Description:  "Redis-backed distributed cache provider",
 		Author:       "MuxCore",
@@ -103,6 +106,7 @@ func (m *Module) Init(ctx context.Context) error {
 func (m *Module) Start(ctx context.Context) error {
 	m.grpcSrv = grpc.NewServer()
 	m.srv.RegisterWithGRPC(m.grpcSrv)
+	modulesdk.RegisterSettings(m.grpcSrv, m.id, m)
 
 	go func() {
 		slog.Info("cache-redis gRPC service started", "addr", m.grpcAddr)
