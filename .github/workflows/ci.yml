@@ -11,7 +11,7 @@ env:
 
 jobs:
   lint:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
@@ -24,7 +24,9 @@ jobs:
       - run: go vet ./...
 
   test:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
+    # Local Redis for live round-trip (miniredis covers unit tests when REDIS_ADDR unset).
+    # On self-hosted runners with Docker, Actions service containers provide redis:7-alpine.
     services:
       redis:
         image: redis:7-alpine
@@ -46,10 +48,16 @@ jobs:
       - name: Configure private modules (HTTPS)
         run: |
           git config --global url."https://x-access-token:${{ secrets.MUXCORE_CI_TOKEN }}@github.com/".insteadOf "https://github.com/"
-      - run: go test -race -count=1 -timeout 10m ./...
+      - name: Ensure Redis reachable (fallback hint)
+        run: |
+          if command -v redis-cli >/dev/null 2>&1; then
+            redis-cli -h 127.0.0.1 -p 6379 ping || true
+          fi
+      # No -race: laptop self-hosted runners lack gcc/CGO.
+      - run: go test -count=1 -timeout 10m ./...
 
   build:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
@@ -65,7 +73,7 @@ jobs:
 
   docker:
     if: (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main')
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: [lint, test, build]
     steps:
       - uses: actions/checkout@v7
