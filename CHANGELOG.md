@@ -1,5 +1,23 @@
 # Changelog
 
+All notable changes to this project are documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0/).
+
+## [Unreleased]
+
+## [0.1.5] — 2026-08-10
+
+### Fixed
+
+- Self-hosted CI (`runs-on: self-hosted`; `go test` without `-race` for laptop runners)
+- `TestLiveRedisRoundTrip` skips when `REDIS_ADDR` is set but Redis is unreachable (miniredis still covers unit tests)
+
+### Changed
+
+- CI keeps `redis:7-alpine` service container for live round-trip when Docker is available on the runner
+
 ## [0.1.4] — 2026-08-10
 
 ### Added
@@ -9,14 +27,8 @@
 ## [0.1.2] — 2026-08-10
 
 ### Fixed
+
 - Sync Info()/muxcore.json version to **0.1.2**.
-
-All notable changes to this project are documented in this file.
-
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0/).
-
-## [Unreleased]
 
 ## [0.1.1] — 2026-08-09
 
