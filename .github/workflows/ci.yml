@@ -25,18 +25,7 @@ jobs:
 
   test:
     runs-on: self-hosted
-    # Local Redis for live round-trip (miniredis covers unit tests when REDIS_ADDR unset).
-    # On self-hosted runners with Docker, Actions service containers provide redis:7-alpine.
-    services:
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 10
+    # Redis service omitted on self-hosted; tests use miniredis when REDIS_ADDR unset.
     env:
       REDIS_ADDR: localhost:6379
     steps:
