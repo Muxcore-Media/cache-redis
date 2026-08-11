@@ -26,8 +26,6 @@ jobs:
   test:
     runs-on: self-hosted
     # Redis service omitted on self-hosted; tests use miniredis when REDIS_ADDR unset.
-    env:
-      REDIS_ADDR: localhost:6379
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -37,11 +35,6 @@ jobs:
       - name: Configure private modules (HTTPS)
         run: |
           git config --global url."https://x-access-token:${{ secrets.MUXCORE_CI_TOKEN }}@github.com/".insteadOf "https://github.com/"
-      - name: Ensure Redis reachable (fallback hint)
-        run: |
-          if command -v redis-cli >/dev/null 2>&1; then
-            redis-cli -h 127.0.0.1 -p 6379 ping || true
-          fi
       # No -race: laptop self-hosted runners lack gcc/CGO.
       - run: go test -count=1 -timeout 10m ./...
 
