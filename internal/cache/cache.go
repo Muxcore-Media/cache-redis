@@ -168,7 +168,7 @@ func (c *Cache) Subscribe(ctx context.Context, channel string) (<-chan []byte, e
 
 	ch := make(chan []byte, 256)
 	go func() {
-		defer pubsub.Close()
+		defer func() { _ = pubsub.Close() }()
 		for msg := range pubsub.Channel() {
 			select {
 			case ch <- []byte(msg.Payload):
