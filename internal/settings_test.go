@@ -22,7 +22,7 @@ func TestSettingsRedisAddrReconnect(t *testing.T) {
 	if err := m.Init(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	defer m.Stop(t.Context())
+	defer func() { _ = m.Stop(t.Context()) }()
 
 	defs := m.Settings()
 	if len(defs) != 3 {
