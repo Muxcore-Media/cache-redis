@@ -122,7 +122,7 @@ func (m *Module) Stop(ctx context.Context) error {
 		m.grpcSrv.GracefulStop()
 	}
 	if m.cache != nil {
-		m.cache.Close()
+		_ = m.cache.Close()
 	}
 	slog.Info("cache-redis stopped")
 	return nil

@@ -149,7 +149,7 @@ func (s *Server) Unlock(ctx context.Context, req *cachev1.UnlockCacheRequest) (*
 	if !ok {
 		return &cachev1.UnlockCacheResponse{Status: "lock not found"}, nil
 	}
-	lk.Unlock(ctx)
+	_ = lk.Unlock(ctx)
 	return &cachev1.UnlockCacheResponse{Status: "ok"}, nil
 }
 
