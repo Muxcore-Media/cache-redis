@@ -15,7 +15,7 @@ func TestLiveRedisRoundTrip(t *testing.T) {
 		t.Skip("REDIS_ADDR not set (miniredis covers unit tests)")
 	}
 	password := os.Getenv("REDIS_PASSWORD")
-	c, err := New(addr, password, 0)
+	c, err := New(Config{Addr: addr, Password: password})
 	if err != nil {
 		// Self-hosted runners may lack Docker service containers; unit tests use miniredis.
 		t.Skipf("Redis at %s unreachable (%v); miniredis covers unit tests", addr, err)
@@ -40,7 +40,7 @@ func TestLiveRedisRoundTrip(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("Exists: ok=%v err=%v", ok, err)
 	}
-	if err := c.Delete(ctx, key); err != nil {
+	if _, err := c.Delete(ctx, key); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 	ok, err = c.Exists(ctx, key)

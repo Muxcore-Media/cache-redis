@@ -5,7 +5,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Muxcore-Media/cache-redis/internal/cache"
 	"github.com/Muxcore-Media/core/pkg/contracts"
 	modulesdk "github.com/Muxcore-Media/core/sdk/go/module"
 )
@@ -26,16 +25,24 @@ func (m *Module) settingsDefs() []contracts.SettingDef {
 			Key:         "redis_addr",
 			Label:       "Redis Address",
 			Type:        contracts.SettingTypeString,
-			Value:       m.redis,
+			Value:       m.redisCfg.Addr,
 			Default:     "localhost:6379",
 			Description: "host:port for Redis (REDIS_ADDR)",
+			Group:       "Redis",
+		},
+		{
+			Key:         "redis_username",
+			Label:       "Redis Username",
+			Type:        contracts.SettingTypeString,
+			Value:       m.redisCfg.Username,
+			Description: "ACL username (REDIS_USERNAME)",
 			Group:       "Redis",
 		},
 		{
 			Key:         "redis_password",
 			Label:       "Redis Password",
 			Type:        contracts.SettingTypeSecret,
-			Value:       modulesdk.MaskSecret(m.password),
+			Value:       modulesdk.MaskSecret(m.redisCfg.Password),
 			Description: "Optional Redis AUTH password (REDIS_PASSWORD)",
 			Group:       "Redis",
 		},
@@ -43,9 +50,17 @@ func (m *Module) settingsDefs() []contracts.SettingDef {
 			Key:         "redis_db",
 			Label:       "Redis DB Index",
 			Type:        contracts.SettingTypeInt,
-			Value:       strconv.Itoa(m.db),
+			Value:       strconv.Itoa(m.redisCfg.DB),
 			Default:     "0",
 			Description: "Redis logical database index (REDIS_DB)",
+			Group:       "Redis",
+		},
+		{
+			Key:         "cache_key_prefix",
+			Label:       "Key Prefix",
+			Type:        contracts.SettingTypeString,
+			Value:       m.redisCfg.KeyPrefix,
+			Description: "Prefix for all keys/channels (CACHE_KEY_PREFIX); required on shared Redis",
 			Group:       "Redis",
 		},
 	}
@@ -58,64 +73,42 @@ func (m *Module) updateSetting(key, value string) error {
 		if value == "" {
 			return fmt.Errorf("redis_addr must not be empty")
 		}
-		return m.setRedis(value, nil, nil)
+		return m.applyRedis(value, nil, nil, nil, nil)
+	case "redis_username", "REDIS_USERNAME":
+		user := value
+		return m.applyRedis("", nil, &user, nil, nil)
 	case "redis_password", "REDIS_PASSWORD":
 		if value == "********" {
 			return nil
 		}
 		pass := value
-		return m.setRedis("", &pass, nil)
+		return m.applyRedis("", &pass, nil, nil, nil)
 	case "redis_db", "REDIS_DB":
-		n, err := strconv.Atoi(value)
-		if err != nil || n < 0 {
-			return fmt.Errorf("invalid redis_db %q (integer >= 0)", value)
+		n, err := parseDB(value)
+		if err != nil {
+			return err
 		}
-		return m.setRedis("", nil, &n)
+		return m.applyRedis("", nil, nil, &n, nil)
+	case "cache_key_prefix", "CACHE_KEY_PREFIX":
+		prefix := value
+		return m.applyRedis("", nil, nil, nil, &prefix)
 	default:
 		return fmt.Errorf("unknown setting %q", key)
 	}
 }
 
-// setRedis updates connection fields and reconnects when Init has completed.
-// Empty addr / nil password / nil db keep the current value.
-func (m *Module) setRedis(addr string, password *string, db *int) error {
+func (m *Module) applyRedis(addr string, password *string, username *string, db *int, prefix *string) error {
 	m.cfgMu.Lock()
-	defer m.cfgMu.Unlock()
-
-	newAddr := m.redis
-	newPass := m.password
-	newDB := m.db
-	if addr != "" {
-		newAddr = addr
-	}
-	if password != nil {
-		newPass = *password
-	}
-	if db != nil {
-		newDB = *db
-	}
-	if newAddr == m.redis && newPass == m.password && newDB == m.db {
+	newCfg := mergeRedisConfig(m.redisCfg, addr, password, username, db, prefix)
+	if redisConfigEqual(newCfg, m.redisCfg) {
+		m.cfgMu.Unlock()
 		return nil
 	}
-
 	if m.srv == nil {
-		m.redis = newAddr
-		m.password = newPass
-		m.db = newDB
+		m.redisCfg = newCfg
+		m.cfgMu.Unlock()
 		return nil
 	}
-
-	c, err := cache.New(newAddr, newPass, newDB)
-	if err != nil {
-		return fmt.Errorf("reconnect Redis: %w", err)
-	}
-	old := m.srv.ReplaceCache(c)
-	m.cache = c
-	m.redis = newAddr
-	m.password = newPass
-	m.db = newDB
-	if old != nil {
-		_ = old.Close()
-	}
-	return nil
+	m.cfgMu.Unlock()
+	return m.reconnect(newCfg)
 }

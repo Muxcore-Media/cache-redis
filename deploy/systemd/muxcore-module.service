@@ -1,12 +1,14 @@
 [Unit]
 Description=MuxCore Module - cache-redis
-After=network-online.target
+After=network-online.target redis.service
 Wants=network-online.target
+Requires=redis.service
 
 [Service]
 Type=simple
 User=muxcore
 Group=muxcore
+EnvironmentFile=-/etc/muxcore/cache-redis.env
 ExecStart=/usr/local/bin/cache-redis \
   --muxcore-mesh-addr localhost:9090 \
   --muxcore-module-id cache-redis

@@ -13,17 +13,34 @@ services:
       retries: 10
       start_period: 5s
 
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   cache-redis:
     build:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "9600"
+      - "9600:9600"
+      - "9601:9601"
     environment:
       MUXCORE_GRPC_ADDR: core:9090
       MUXCORE_INSECURE_DISABLE_TLS: "true"
       MUXCORE_LOG_LEVEL: debug
       MUXCORE_MODULE_ID: cache-redis
+      REDIS_ADDR: redis:6379
+      CACHE_GRPC_ADDR: ":9600"
+      CACHE_HTTP_ADDR: ":9601"
+      CACHE_KEY_PREFIX: "muxcore:"
     depends_on:
       core:
+        condition: service_healthy
+      redis:
         condition: service_healthy

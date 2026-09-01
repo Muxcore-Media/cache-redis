@@ -8,6 +8,7 @@ on:
 env:
   REGISTRY: ghcr.io
   GOPRIVATE: github.com/Muxcore-Media/*
+  REDIS_ADDR: localhost:6379
 
 jobs:
   lint:
@@ -21,11 +22,18 @@ jobs:
       - name: Configure private modules (HTTPS)
         run: |
           git config --global url."https://x-access-token:${{ secrets.MUXCORE_CI_TOKEN }}@github.com/".insteadOf "https://github.com/"
-      - run: go vet ./...
+      - name: Install golangci-lint
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b "$(go env GOPATH)/bin" v2.1.6
+      - run: golangci-lint run --timeout 120s ./...
 
   test:
     runs-on: self-hosted
-    # Redis service omitted on self-hosted; tests use miniredis when REDIS_ADDR unset.
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7

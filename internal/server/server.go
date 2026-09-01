@@ -2,10 +2,10 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -17,6 +17,9 @@ import (
 	cachev1 "github.com/Muxcore-Media/core/proto/gen/muxcore/cache/v1"
 )
 
+// DefaultLockTTL is applied when Lock requests ttl_seconds <= 0.
+const DefaultLockTTL = 30 * time.Second
+
 type Server struct {
 	cachev1.UnimplementedCacheServiceServer
 	cachePtr  atomic.Pointer[cache.Cache]
@@ -24,26 +27,18 @@ type Server struct {
 	setCount  atomic.Int64
 	delCount  atomic.Int64
 	incrCount atomic.Int64
-	lockMu    sync.Mutex
-	locks     map[string]*cache.Lock
 }
 
 func New(c *cache.Cache) *Server {
-	s := &Server{
-		locks: make(map[string]*cache.Lock),
-	}
+	s := &Server{}
 	s.cachePtr.Store(c)
 	return s
 }
 
-// ReplaceCache swaps the backing Redis client and drops in-memory lock tokens.
+// ReplaceCache swaps the backing Redis client.
 // Returns the previous cache (caller should Close it).
 func (s *Server) ReplaceCache(c *cache.Cache) *cache.Cache {
-	old := s.cachePtr.Swap(c)
-	s.lockMu.Lock()
-	s.locks = make(map[string]*cache.Lock)
-	s.lockMu.Unlock()
-	return old
+	return s.cachePtr.Swap(c)
 }
 
 func (s *Server) cache() *cache.Cache {
@@ -84,15 +79,19 @@ func (s *Server) Set(ctx context.Context, req *cachev1.SetCacheRequest) (*cachev
 }
 
 func (s *Server) Delete(ctx context.Context, req *cachev1.DeleteCacheRequest) (*cachev1.DeleteCacheResponse, error) {
-	if err := s.cache().Delete(ctx, req.GetKeys()...); err != nil {
+	n, err := s.cache().Delete(ctx, req.GetKeys()...)
+	if err != nil {
 		slog.Error("cache: delete failed", "keys", req.GetKeys(), "error", err)
 		return nil, status.Error(codes.Internal, "delete failed")
 	}
 	s.delCount.Add(1)
-	return &cachev1.DeleteCacheResponse{Deleted: int32(len(req.GetKeys()))}, nil
+	return &cachev1.DeleteCacheResponse{Deleted: int32(n)}, nil
 }
 
 func (s *Server) Exists(ctx context.Context, req *cachev1.ExistsCacheRequest) (*cachev1.ExistsCacheResponse, error) {
+	if req.GetKey() == "" {
+		return nil, status.Error(codes.InvalidArgument, "key is required")
+	}
 	exists, err := s.cache().Exists(ctx, req.GetKey())
 	if err != nil {
 		return nil, status.Error(codes.Internal, "exists check failed")
@@ -101,6 +100,9 @@ func (s *Server) Exists(ctx context.Context, req *cachev1.ExistsCacheRequest) (*
 }
 
 func (s *Server) Incr(ctx context.Context, req *cachev1.IncrCacheRequest) (*cachev1.IncrCacheResponse, error) {
+	if req.GetKey() == "" {
+		return nil, status.Error(codes.InvalidArgument, "key is required")
+	}
 	n, err := s.cache().Incr(ctx, req.GetKey(), req.GetDelta())
 	if err != nil {
 		return nil, status.Error(codes.Internal, "incr failed")
@@ -110,6 +112,9 @@ func (s *Server) Incr(ctx context.Context, req *cachev1.IncrCacheRequest) (*cach
 }
 
 func (s *Server) CompareAndSwap(ctx context.Context, req *cachev1.CompareAndSwapCacheRequest) (*cachev1.CompareAndSwapCacheResponse, error) {
+	if req.GetKey() == "" {
+		return nil, status.Error(codes.InvalidArgument, "key is required")
+	}
 	swapped, err := s.cache().CompareAndSwap(ctx, req.GetKey(), req.GetOldValue(), req.GetNewValue())
 	if err != nil {
 		return nil, status.Error(codes.Internal, "cas failed")
@@ -118,21 +123,20 @@ func (s *Server) CompareAndSwap(ctx context.Context, req *cachev1.CompareAndSwap
 }
 
 func (s *Server) Lock(ctx context.Context, req *cachev1.LockCacheRequest) (*cachev1.LockCacheResponse, error) {
+	if req.GetKey() == "" {
+		return nil, status.Error(codes.InvalidArgument, "key is required")
+	}
 	ttl := time.Duration(req.GetTtlSeconds()) * time.Second
 	if ttl <= 0 {
-		ttl = 30 * time.Second
+		ttl = DefaultLockTTL
 	}
-	lk, err := s.cache().Lock(ctx, req.GetKey(), ttl)
+	token, err := s.cache().Lock(ctx, req.GetKey(), ttl)
 	if err != nil {
 		return &cachev1.LockCacheResponse{
 			Key:      req.GetKey(),
 			Acquired: false,
 		}, nil
 	}
-	token := fmt.Sprintf("%x", time.Now().UnixNano())
-	s.lockMu.Lock()
-	s.locks[token] = lk
-	s.lockMu.Unlock()
 	return &cachev1.LockCacheResponse{
 		Key:      req.GetKey(),
 		Token:    token,
@@ -142,24 +146,31 @@ func (s *Server) Lock(ctx context.Context, req *cachev1.LockCacheRequest) (*cach
 
 func (s *Server) Unlock(ctx context.Context, req *cachev1.UnlockCacheRequest) (*cachev1.UnlockCacheResponse, error) {
 	token := req.GetToken()
-	s.lockMu.Lock()
-	lk, ok := s.locks[token]
-	delete(s.locks, token)
-	s.lockMu.Unlock()
-	if !ok {
-		return &cachev1.UnlockCacheResponse{Status: "lock not found"}, nil
+	if token == "" {
+		return nil, status.Error(codes.InvalidArgument, "token is required")
 	}
-	_ = lk.Unlock(ctx)
+	err := s.cache().UnlockByToken(ctx, token)
+	if errors.Is(err, cache.ErrLockNotHeld) {
+		return &cachev1.UnlockCacheResponse{Status: "lock not held"}, nil
+	}
+	if err != nil {
+		slog.Error("cache: unlock failed", "error", err)
+		return nil, status.Error(codes.Internal, "unlock failed")
+	}
 	return &cachev1.UnlockCacheResponse{Status: "ok"}, nil
 }
 
 func (s *Server) Publish(ctx context.Context, req *cachev1.PublishCacheRequest) (*cachev1.PublishCacheResponse, error) {
+	if req.GetChannel() == "" {
+		return nil, status.Error(codes.InvalidArgument, "channel is required")
+	}
 	if err := s.cache().Publish(ctx, req.GetChannel(), req.GetMessage()); err != nil {
 		return nil, status.Error(codes.Internal, "publish failed")
 	}
 	return &cachev1.PublishCacheResponse{}, nil
 }
 
+// Metrics renders Prometheus text for cache operation counters.
 func (s *Server) Metrics() string {
 	var b strings.Builder
 	b.WriteString("# HELP cache_get_total Total cache get operations\n")
@@ -178,6 +189,9 @@ func (s *Server) Metrics() string {
 }
 
 func (s *Server) Subscribe(req *cachev1.SubscribeCacheRequest, stream cachev1.CacheService_SubscribeServer) error {
+	if req.GetChannel() == "" {
+		return status.Error(codes.InvalidArgument, "channel is required")
+	}
 	ch, err := s.cache().Subscribe(stream.Context(), req.GetChannel())
 	if err != nil {
 		return status.Error(codes.Internal, "subscribe failed")

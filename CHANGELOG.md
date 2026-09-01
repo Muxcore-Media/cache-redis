@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Distributed lock tokens (crypto/rand, key embedded in token; unlock works across replicas).
+- Production Redis options: `REDIS_USERNAME`, TLS/`REDIS_TLS_*`, `REDIS_URL`, `CACHE_KEY_PREFIX`.
+- HTTP `/metrics` and `/health` on `CACHE_HTTP_ADDR` (default `127.0.0.1:9601`); `--health-check` for Docker/systemd.
+- Forgejo/GitHub CI: `redis:7-alpine` service, `golangci-lint`, live round-trip test.
+
+### Fixed
+
+- `Subscribe` honors context cancel and closes pubsub/channel (no goroutine leak).
+- `CompareAndSwap` preserves TTL and handles binary payloads (NUL bytes).
+- `Delete` returns Redis `DEL` count, not `len(keys)`.
+- Empty key/channel validation on all RPCs.
+- Operator packaging: compose Redis service, systemd `EnvironmentFile`, Dockerfile `EXPOSE 9600/9601`.
+
+### Changed
+
+- `Makefile` / Docker image tags use `ghcr.io/muxcore-media/cache-redis`.
+- Replaced skip-happy integration scaffold with in-process CacheService tests.
+
 ## [0.1.5] — 2026-08-10
 
 ### Fixed
