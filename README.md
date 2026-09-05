@@ -33,9 +33,11 @@ Laptop demos that do not need a shared Redis should prefer [`cache-local`](https
 | `REDIS_ADDR` | `localhost:6379` | Redis host:port |
 | `REDIS_PASSWORD` | `` | Redis password (optional) |
 | `REDIS_DB` | `0` | Redis database index |
-| `CACHE_GRPC_ADDR` | `:9600` | gRPC listen address |
+| `CACHE_GRPC_ADDR` | `127.0.0.1:9600` | gRPC listen address (set explicitly for non-loopback) |
 | `MUXCORE_GRPC_ADDR` | — | Core mesh address (or `--muxcore-mesh-addr`) |
 | `MUXCORE_MODULE_ID` | `cache-redis` | Module ID override (or `--muxcore-module-id`) |
+| `MUXCORE_INSECURE_DISABLE_TLS` | — | Dev-only: disable TLS on inbound and outbound gRPC |
+| `CACHE_REDIS_TLS_CERT` / `_KEY` / `_CA` / `_DIR` | — | Optional TLS material (auto-generated when unset) |
 
 ---
 
@@ -48,7 +50,7 @@ export REDIS_ADDR=localhost:6379
 ./cache-redis --muxcore-mesh-addr localhost:9090
 ```
 
-Core must be reachable (dev: `MUXCORE_INSECURE_DISABLE_TLS=true ./muxcored` in `../core`).
+Core must be reachable. For local dev without TLS, set `MUXCORE_INSECURE_DISABLE_TLS=true` on both core and this module (`./muxcored` in `../core`). Production uses TLS by default on the module gRPC listener.
 
 ---
 

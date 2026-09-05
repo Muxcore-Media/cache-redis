@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Inbound gRPC TLS by default via `internal/grpctls` (auto-generated certs or `CACHE_REDIS_TLS_*` / `MUXCORE_TLS_*` overrides).
+- Default gRPC bind `127.0.0.1:9600` (loopback); set `CACHE_GRPC_ADDR` for non-loopback. Plaintext only with `MUXCORE_INSECURE_DISABLE_TLS` or `MUXCORE_GRPC_INSECURE`.
+
 ## [0.1.5] — 2026-08-10
 
 ### Fixed
