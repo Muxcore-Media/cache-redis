@@ -13,7 +13,9 @@ jobs:
   lint:
     runs-on: self-hosted
     steps:
-      - uses: actions/checkout@v7
+      - uses: Muxcore-Media/mvp/.github/actions/checkout-mirror@main
+        with:
+          token: ${{ secrets.MUXCORE_CI_TOKEN || github.token }}
       - uses: actions/setup-go@v7
         with:
           go-version: "1.26"
@@ -27,7 +29,9 @@ jobs:
     runs-on: self-hosted
     # Redis service omitted on self-hosted; tests use miniredis when REDIS_ADDR unset.
     steps:
-      - uses: actions/checkout@v7
+      - uses: Muxcore-Media/mvp/.github/actions/checkout-mirror@main
+        with:
+          token: ${{ secrets.MUXCORE_CI_TOKEN || github.token }}
       - uses: actions/setup-go@v7
         with:
           go-version: "1.26"
@@ -41,7 +45,9 @@ jobs:
   build:
     runs-on: self-hosted
     steps:
-      - uses: actions/checkout@v7
+      - uses: Muxcore-Media/mvp/.github/actions/checkout-mirror@main
+        with:
+          token: ${{ secrets.MUXCORE_CI_TOKEN || github.token }}
       - uses: actions/setup-go@v7
         with:
           go-version: "1.26"
@@ -58,7 +64,9 @@ jobs:
     runs-on: self-hosted
     needs: [lint, test, build]
     steps:
-      - uses: actions/checkout@v7
+      - uses: Muxcore-Media/mvp/.github/actions/checkout-mirror@main
+        with:
+          token: ${{ secrets.MUXCORE_CI_TOKEN || github.token }}
       - name: Configure private modules (HTTPS)
         run: |
           git config --global url."https://x-access-token:${{ secrets.MUXCORE_CI_TOKEN }}@github.com/".insteadOf "https://github.com/"
