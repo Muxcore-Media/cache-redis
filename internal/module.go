@@ -7,11 +7,14 @@ import (
 	"net"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 
 	"github.com/Muxcore-Media/cache-redis/internal/cache"
+	"github.com/Muxcore-Media/cache-redis/internal/grpctls"
 	"github.com/Muxcore-Media/cache-redis/internal/server"
 	"github.com/Muxcore-Media/core/pkg/contracts"
 	modulesdk "github.com/Muxcore-Media/core/sdk/go/module"
@@ -47,7 +50,7 @@ func NewModule(cfg Config) *Module {
 		cfg.Redis = "localhost:6379"
 	}
 	if cfg.GRPCAddr == "" {
-		cfg.GRPCAddr = ":9600"
+		cfg.GRPCAddr = "127.0.0.1:9600"
 	}
 	if v := os.Getenv("REDIS_ADDR"); v != "" {
 		cfg.Redis = v
@@ -63,6 +66,7 @@ func NewModule(cfg Config) *Module {
 	if v := os.Getenv("CACHE_GRPC_ADDR"); v != "" {
 		cfg.GRPCAddr = v
 	}
+	cfg.GRPCAddr = resolveGRPCAddr(cfg.GRPCAddr)
 	return &Module{
 		id:       cfg.ID,
 		redis:    cfg.Redis,
@@ -104,7 +108,21 @@ func (m *Module) Init(ctx context.Context) error {
 }
 
 func (m *Module) Start(ctx context.Context) error {
-	m.grpcSrv = grpc.NewServer()
+	var grpcOpts []grpc.ServerOption
+	tlsCfg, err := grpctls.ServerConfig()
+	if err != nil {
+		return fmt.Errorf("gRPC TLS: %w", err)
+	}
+	if tlsCfg != nil {
+		grpcOpts = append(grpcOpts, grpc.Creds(credentials.NewTLS(tlsCfg)))
+		slog.Info("cache-redis gRPC TLS enabled", "addr", m.grpcAddr)
+	} else {
+		slog.Warn("cache-redis gRPC listening without TLS (dev only)",
+			"addr", m.grpcAddr,
+			"hint", "unset MUXCORE_INSECURE_DISABLE_TLS for production",
+		)
+	}
+	m.grpcSrv = grpc.NewServer(grpcOpts...)
 	m.srv.RegisterWithGRPC(m.grpcSrv)
 	modulesdk.RegisterSettings(m.grpcSrv, m.id, m)
 
@@ -126,6 +144,25 @@ func (m *Module) Stop(ctx context.Context) error {
 	}
 	slog.Info("cache-redis stopped")
 	return nil
+}
+
+// resolveGRPCAddr prefers loopback when plaintext is explicitly enabled and the
+// bind address would otherwise listen on all interfaces.
+func resolveGRPCAddr(addr string) string {
+	if !grpctls.InsecureAllowed() {
+		return addr
+	}
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		if strings.HasPrefix(addr, ":") {
+			return "127.0.0.1" + addr
+		}
+		return addr
+	}
+	if host == "" || host == "0.0.0.0" {
+		return "127.0.0.1:" + port
+	}
+	return addr
 }
 
 func (m *Module) Health(ctx context.Context) error {
