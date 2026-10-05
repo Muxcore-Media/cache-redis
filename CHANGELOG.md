@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-10-05
+
+### Changed
+- CI runs on GitHub-hosted runners from the umbrella template; retired-origin workflows removed.
+- Dependencies resolve from published GitHub tags (no filesystem `replace`); requires core v0.6.0.
+
 ### Added
 
 - Inbound gRPC TLS by default via `internal/grpctls` (auto-generated certs or `CACHE_REDIS_TLS_*` / `MUXCORE_TLS_*` overrides).
